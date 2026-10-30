@@ -147,6 +147,16 @@ details.guia summary{cursor:pointer;font-weight:700;color:var(--accent)}
 .jq h1.jcod{font-family:var(--f-mono)}
 .jcat{display:flex;flex-direction:column;gap:2px}.jcat small{font-weight:500;color:var(--muted);font-size:12.5px}
 .jtag{font-style:normal;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--new);background:var(--new-soft);border-radius:4px;padding:1px 6px;margin-left:4px}
+.pgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.pform label{display:flex;flex-direction:column;gap:3px;font-size:12.5px;font-weight:600;color:var(--muted)}
+.pform input,.pform select,.pform textarea{font:inherit;font-size:14.5px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-weight:400}
+.pap{border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.crono{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.crono .fbtn{white-space:nowrap}.crono b{font-family:var(--f-mono);font-size:18px;color:var(--ink);min-width:56px}
+.x{background:none;border:0;color:var(--muted);font-size:12.5px;text-decoration:underline;padding:0;cursor:pointer}
+.chip .x{text-decoration:none;font-size:14px;margin-left:2px}
+.lv.rep{background:var(--rep-soft);color:var(--rep)}
+.chip.r-correcto{border-color:var(--ok);color:var(--ok)}.chip.r-parcial{border-color:var(--part);color:var(--part)}.chip.r-incorrecto,.chip.r-blanco{border-color:var(--rep);color:var(--rep)}
+.est-completado{color:var(--ok);font-weight:700}.est-parcial{color:var(--part);font-weight:700}.est-reservado{color:var(--new);font-weight:700}
 </style>
 </head><body>
 
@@ -157,6 +167,7 @@ details.guia summary{cursor:pointer;font-weight:700;color:var(--accent)}
     <button class="tab" role="tab" id="tab-dia" aria-selected="true" data-view="dia">Día</button>
     <button class="tab" role="tab" id="tab-fichas" aria-selected="false" data-view="fichas">Fichas</button>
     <button class="tab" role="tab" id="tab-juego" aria-selected="false" data-view="juego">Juego</button>
+    <button class="tab" role="tab" id="tab-practica" aria-selected="false" data-view="practica">Práctica</button>
     <button class="tab" role="tab" id="tab-semana" aria-selected="false" data-view="semana">Calendario</button>
     <button class="tab" role="tab" id="tab-arts" aria-selected="false" data-view="arts">Artículos</button>
   </div>
@@ -173,7 +184,7 @@ const MESES = ["enero","febrero","marzo","abril","mayo","junio","julio","agosto"
 const fmt = f => { const [y,m,d] = f.split("-").map(Number); return d+" de "+MESES[m-1]; };
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-let state = { dias:{}, cards:{}, dominio:{}, fichas:{}, juego:{} };
+let state = { dias:{}, cards:{}, dominio:{}, fichas:{}, juego:{}, dom:{}, recs:{}, moron:{} };
 let view = "dia";
 let cur = pickDay(TODAY);
 try { const v = localStorage.getItem("hoy-view"); if (v) view = v; } catch(e){}
@@ -217,7 +228,7 @@ async function pull(){
   try {
     const remote = await rpc("leer_progreso", { p_clave: CODE });
     if (remote && typeof remote === "object"){
-      state = { dias: remote.dias||{}, cards: remote.cards||{}, dominio: remote.dominio||{}, fichas: remote.fichas||{}, juego: remote.juego||{} };
+      state = Object.assign({ dias:{}, cards:{}, dominio:{}, fichas:{}, juego:{}, dom:{}, recs:{}, moron:{} }, remote);
       persistLocal(); render();
     } else {
       const local = Object.keys(state.dias).length || Object.keys(state.cards).length || Object.keys(state.dominio).length || Object.keys(state.fichas||{}).length;
@@ -247,12 +258,13 @@ function itemsDia(f){
   const nuevas = FICHAS.filter(x => x.desde === f);
   const repasos = FICHAS.filter(x => x.desde !== f && fichaEstado(x) && (f === TODAY ? fichaEstado(x).due <= f : fichaEstado(x).due === f));
   const arr = CARDS.filter(c => c.fecha === f);
-  return { nuevas, repasos, arr };
+  const recs = recsDe(f);
+  return { nuevas, repasos, arr, recs };
 }
 function abrirCola(f){
   const it = itemsDia(f);
   fichaDia = f; fichaModo = "dia"; colaIdx = 0; fichaVuelta = false; respDraft = "";
-  cola = [...it.nuevas.map(x => ({t:"ficha", id:x.id})), ...it.repasos.map(x => ({t:"ficha", id:x.id, rep:true})), ...it.arr.map(c => ({t:"arr", id:c.id}))];
+  cola = [...it.nuevas.map(x => ({t:"ficha", id:x.id})), ...it.repasos.map(x => ({t:"ficha", id:x.id, rep:true})), ...it.arr.map(c => ({t:"arr", id:c.id})), ...it.recs.map(k => ({t:"rec", id:k}))];
 }
 function gradeFicha(id, g){
   state.fichas = state.fichas || {};
@@ -260,11 +272,12 @@ function gradeFicha(id, g){
   let b = s.b || 0;
   if (g === "mal") b = 0; else if (g === "bien" && state.fichas[id]) b = Math.min(b + 1, INTERVALOS.length - 1);
   state.fichas[id] = { b, due: addDays(TODAY, g === "mal" ? 1 : INTERVALOS[b]), last: g };
+  const ff = FICHAS.find(x => x.id === id); if (ff){ artIdsFrom(ff.art).forEach(a => { if (g === "bien") domRaise(a, 3, "fichas"); else if (g === "mal") domFlag(a); }); }
 }
 function siguiente(){ colaIdx++; fichaVuelta = false; respDraft = ""; scheduleSave(); render(); window.scrollTo(0,0); }
 function resumenDia(f){
   const it = itemsDia(f);
-  return { n: it.nuevas.length, r: it.repasos.length, a: it.arr.length };
+  return { n: it.nuevas.length, r: it.repasos.length, a: it.arr.length, c: it.recs.length };
 }
 function renderFichas(){
   if (!fichaDia) abrirCola(pickDay(TODAY));
@@ -291,6 +304,15 @@ function renderFichas(){
     <div class="estado" style="justify-content:center"><button data-cola="${fichaDia}">Repetir este día</button></div></div>`;
   const item = cola[colaIdx];
   const pos = `<span>Tarjeta ${colaIdx+1} de ${cola.length}</span>`;
+  if (item.t === "rec"){
+    const r = state.recs[item.id] || {}; const tipo = REC_TIPOS.find(t => t[1] === r.tipo) || [];
+    return h + `<section class="head fc"><div class="when"><span class="code">Recuperación ${esc(r.tipo||"")}</span>${pos}</div>
+      <div class="lbl">${esc(tipo[2]||"")}</div><h1 style="font-size:24px">${esc(artLabel(r.art))}</h1><p style="margin:0">${esc(artQue(r.art))}</p>
+      <p style="margin:0;font-size:13px;color:var(--muted)">Viene de: ${esc(r.origen||"un error anterior")}</p>
+      <label class="lbl" for="resp">Escribe la regla o resuelve sin mirar</label>
+      <textarea id="resp" rows="6" placeholder="Figura · regla · condición decisiva · artículo">${esc(respDraft)}</textarea>
+      <div class="estado"><button data-rec="rep" data-v="Parcial">Reparar</button><button data-rec="ok" data-v="Hecho">Me salió</button><button data-rec="manana" data-v="">Pasar a mañana</button></div></section>`;
+  }
   if (item.t === "arr"){
     const c = CARDS.find(x => x.id === item.id);
     return h + `<section class="head fc"><div class="when"><span class="code">Arrastre · ${esc(c.etapa)}</span>${pos}</div>
@@ -367,6 +389,7 @@ function jResponder(v){
   state.juego = state.juego || {};
   const s = Object.assign({ ok:0, f:0 }, state.juego[q.it.id]);
   if (bien){ s.ok++; jr.aciertos++; jr.racha++; jr.mejor = Math.max(jr.mejor, jr.racha); } else { s.ok = 0; s.f++; jr.racha = 0; jr.fallos.push(q); }
+  if (bien) domRaise(q.it.id, 2, "juego");
   state.juego[q.it.id] = s; scheduleSave(); render();
 }
 function renderJuego(){
@@ -407,6 +430,138 @@ function renderJuego(){
       <div class="estado"><button data-jsig="1" data-v="" aria-pressed="true">${jr.i+1 < jr.qs.length ? "Siguiente" : "Ver resultado"}</button></div>`;
   }
   return h + `</section>`;
+}
+
+/* ---------- práctica: dominio por artículo, Morón y recuperaciones ---------- */
+const NIVELES = ["Sin evaluar", "No lo recuerdo", "Reconozco de qué trata", "Puedo explicarlo de memoria", "Puedo aplicarlo en un supuesto"];
+const JMAP = Object.fromEntries(JI.map(x => [x.id, x]));
+const REC_TIPOS = [[3, "+3", "Recuerda la regla sin mirar", 3], [7, "+7", "Aplícala en un ejercicio breve distinto", 4], [14, "+14", "Recupérala en un supuesto mezclado", 4]];
+const RESULTADOS = [["pendiente","Pendiente (no intentado)"],["correcto","Correcto"],["parcial","Parcial"],["incorrecto","Incorrecto"],["blanco","En blanco"]];
+const ESTADOS_EJ = [["pendiente","Pendiente"],["completado","Completado"],["parcial","Parcialmente realizado"],["reservado","Reservado"]];
+const ERRORES = ["parcial","incorrecto","blanco"];
+function artLabel(id){ const x = JMAP[id]; return x ? x.ley + " " + x.num : id; }
+function artQue(id){ const x = JMAP[id]; return x ? x.que : ""; }
+function leyKey(s){ const u = s.toUpperCase();
+  if (u.includes("39/2015")) return "Ley 39/2015"; if (u.includes("31/1990")) return "Ley 31/1990";
+  for (const k of ["LIRPF","LIVA","LIS","LGT","CAU","TREBEP","CE"]) if (new RegExp("\\b"+k+"\\b").test(u)) return k; return null; }
+function artIdsFrom(txt){ const ley = leyKey(txt||""); if (!ley) return [];
+  const nums = (txt.replace(/39\/2015|31\/1990/g, "").match(/(?<![.\d])\d+/g) || []);
+  const pre = ley.replace(/ /g,"").replace("/","");
+  return [...new Set(nums.map(n => pre + "-" + n).filter(id => JMAP[id]))]; }
+function domOf(id){ return (state.dom || {})[id] || { n: 0, rep: false }; }
+function domSet(id, patch){ state.dom = state.dom || {}; state.dom[id] = Object.assign({ n: 0, rep: false }, state.dom[id], patch); }
+function domRaise(id, cap, src){ const d = domOf(id); if (d.n < cap) domSet(id, { n: cap, src, when: TODAY }); }
+function domFlag(id){ const d = domOf(id); domSet(id, { rep: true, when: TODAY, n: d.n || 1 }); }
+/* migración única de la escala antigua 0-3 */
+function migrarDominio(){
+  if (state.domMig) return; state.dom = state.dom || {};
+  ARTS.forEach(a => { const v = (state.dominio||{})[a.id]; if (v > 0) artIdsFrom(a.norma + " " + a.art).forEach(id => domRaise(id, v + 1, "escala anterior")); });
+  state.domMig = true;
+}
+/* recuperaciones */
+function recsDe(f){ return Object.entries(state.recs || {}).filter(([k, r]) => r.estado === "pendiente" && (f === TODAY ? r.fecha <= f : r.fecha === f)).map(([k]) => k); }
+function programarRecs(art, origen){
+  state.recs = state.recs || {};
+  REC_TIPOS.forEach(([d, tipo]) => { let fecha = addDays(TODAY, d); while ((DAYS.find(x => x.fecha === fecha)||{}).tipo === "descanso") fecha = addDays(fecha, 1);
+    const dup = Object.values(state.recs).some(r => r.art === art && r.fecha === fecha && r.estado === "pendiente");
+    if (!dup) state.recs[art + "_" + fecha + "_" + tipo.replace("+","p")] = { art, fecha, tipo, origen, estado: "pendiente", hist: [] }; });
+}
+function reprogramar(obj, dias){ const de = obj.fecha; obj.fecha = addDays(TODAY, dias); (obj.hist ||= []).push({ accion: "reprogramado", de, a: obj.fecha, el: TODAY }); }
+function cerrarRec(key, ok){
+  const r = state.recs[key]; if (!r) return;
+  r.estado = ok ? "ok" : "reparar"; (r.hist ||= []).push({ accion: ok ? "recuperado" : "fallado", el: TODAY });
+  const cap = (REC_TIPOS.find(t => t[1] === r.tipo) || [0,0,0,3])[3];
+  if (ok){ domRaise(r.art, cap, "recuperación " + r.tipo); if (r.tipo === "+14") domSet(r.art, { rep: false }); }
+  else { domFlag(r.art); }
+}
+/* ejercicios de Morón */
+let pEdit = null, pTimer = null, pTimerStart = 0;
+function nuevoEjercicio(){
+  const d = DAYS.find(x => x.fecha === pickDay(TODAY));
+  pEdit = { id: "ej" + Date.now(), fecha: TODAY, materia: d && d.tipo === "tema" ? d.bloque : "", pagina: "", numero: "", estado: "pendiente", tiempo: 0, notas: "",
+    apartados: [{ ap: "a", arts: [], res: "pendiente", fallo: "" }], hist: [] };
+}
+function editarEjercicio(id){ pEdit = JSON.parse(JSON.stringify(state.moron[id])); }
+function guardarEjercicio(){
+  pararCrono();
+  state.moron = state.moron || {};
+  const prev = state.moron[pEdit.id];
+  pEdit.apartados.forEach((a, i) => {
+    const antes = prev && prev.apartados[i] ? prev.apartados[i].res : "pendiente";
+    if (a.res === antes) return;
+    if (a.res === "correcto") a.arts.forEach(id => { domRaise(id, 4, "Morón"); domSet(id, { rep: false }); });
+    if (ERRORES.includes(a.res) && !ERRORES.includes(antes)) a.arts.forEach(id => { domFlag(id); programarRecs(id, "Morón · " + (pEdit.materia || "ejercicio")); });
+  });
+  if (pEdit.estado === "pendiente" && pEdit.apartados.some(a => a.res !== "pendiente"))
+    pEdit.estado = pEdit.apartados.every(a => a.res !== "pendiente") ? "completado" : "parcial";
+  state.moron[pEdit.id] = pEdit; pEdit = null; scheduleSave(); render(); window.scrollTo(0,0);
+}
+function fmtT(s){ s = Math.round(s||0); return Math.floor(s/60) + ":" + String(s%60).padStart(2,"0"); }
+function arrancarCrono(){ if (pTimer) return; pTimerStart = Date.now(); pTimer = setInterval(() => { const el = document.getElementById("crono"); if (el) el.textContent = fmtT(pEdit.tiempo + (Date.now()-pTimerStart)/1000); }, 500); }
+function pararCrono(){ if (!pTimer) return; clearInterval(pTimer); pTimer = null; if (pEdit) pEdit.tiempo += (Date.now()-pTimerStart)/1000; }
+function datalistArts(){ return `<datalist id="artlist">${JI.map(x => `<option value="${esc(x.ley+" "+x.num+" · "+x.que)}"></option>`).join("")}</datalist>`; }
+function renderPractica(){
+  migrarDominio();
+  const ejs = Object.values(state.moron || {}).sort((a,b) => (b.fecha+b.id).localeCompare(a.fecha+a.id));
+  const aps = ejs.flatMap(e => e.apartados.filter(a => a.res !== "pendiente"));
+  const ok = aps.filter(a => a.res === "correcto").length;
+  const aplicados = Object.values(state.dom || {}).filter(d => d.n >= 4).length;
+  const rep = Object.values(state.dom || {}).filter(d => d.rep).length;
+  let h = `<div class="stats"><span>Ejercicios <b>${ejs.length}</b></span><span>Apartados correctos <b>${ok}/${aps.length}</b></span><span>Artículos aplicados sin mirar <b>${aplicados}</b></span><span>Necesitan reparación <b>${rep}</b></span></div>`;
+  if (pEdit){
+    const e = pEdit;
+    h += `<section class="head pform">${datalistArts()}<h1 style="font-size:22px">${state.moron && state.moron[e.id] ? "Editar ejercicio" : "Nuevo ejercicio de Morón"}</h1>
+      <div class="pgrid">
+        <label>Fecha<input type="date" data-pf="fecha" value="${esc(e.fecha)}"></label>
+        <label>Materia<input data-pf="materia" value="${esc(e.materia)}" placeholder="Ej.: Recaudación · apremio"></label>
+        <label>Página<input data-pf="pagina" value="${esc(e.pagina)}" inputmode="numeric" placeholder="Ej.: 205"></label>
+        <label>Nº de ejercicio<input data-pf="numero" value="${esc(e.numero)}" placeholder="Ej.: 3"></label>
+        <label>Estado<select data-pf="estado">${ESTADOS_EJ.map(([v,t]) => `<option value="${v}" ${e.estado===v?"selected":""}>${t}</option>`).join("")}</select></label>
+        <label>Tiempo<span class="crono"><b id="crono">${fmtT(e.tiempo)}</b><button class="fbtn" data-crono="1">${pTimer?"Pausar":"Iniciar"}</button><button class="fbtn" data-crono0="1">Reiniciar</button></span></label>
+      </div>
+      <div class="lbl">Apartados · deja en «Pendiente» los que no intentes: no cuentan como error</div>
+      ${e.apartados.map((a, i) => `<div class="pap">
+        <div class="pgrid"><label>Apartado<input data-pap="${i}" data-pk="ap" value="${esc(a.ap)}"></label>
+        <label>Resultado<select data-pap="${i}" data-pk="res">${RESULTADOS.map(([v,t]) => `<option value="${v}" ${a.res===v?"selected":""}>${t}</option>`).join("")}</select></label></div>
+        <div class="chips">${a.arts.map(id => `<span class="chip">${esc(artLabel(id))} <button class="x" data-quitart="${i}|${id}" aria-label="Quitar ${esc(artLabel(id))}">×</button></span>`).join("")}</div>
+        <span class="testrow"><input list="artlist" data-addart="${i}" placeholder="Añadir artículo: escribe «LGT 167»" style="width:100%;max-width:340px"><button class="fbtn" data-addartbtn="${i}">Añadir</button></span>
+        <label>Qué he fallado y qué debo recuperar<textarea data-pap="${i}" data-pk="fallo" rows="2">${esc(a.fallo)}</textarea></label>
+        ${e.apartados.length > 1 ? `<button class="x" data-quitap="${i}">Quitar apartado</button>` : ""}</div>`).join("")}
+      <div class="acts"><button class="fbtn" data-addap="1">+ Añadir apartado</button></div>
+      <label>Notas<textarea data-pf="notas" rows="2">${esc(e.notas)}</textarea></label>
+      <div class="mem" style="font-size:13.5px"><b>Respuesta breve de examen:</b> 1) identifica la figura · 2) di la regla · 3) la condición decisiva del caso · 4) cita el artículo si lo sabes.</div>
+      <div class="estado"><button data-pguardar="1" data-v="Hecho" aria-pressed="true">Guardar</button><button data-pcancel="1" data-v="">Cancelar</button></div></section>`;
+    return h;
+  }
+  h += `<section class="head"><h1 style="font-size:22px">Ejercicios de Morón</h1>
+    <p style="margin:0">Registra cada ejercicio por apartados, con sus artículos. Los apartados correctos suben esos artículos a «Puedo aplicarlo»; los fallados los marcan para reparar y programan recuperaciones a +3, +7 y +14 días.</p>
+    <div class="estado"><button data-pnuevo="1" data-v="Hecho" aria-pressed="true">+ Nuevo ejercicio</button></div></section>`;
+  if (!ejs.length) h += `<p class="empty">Aún no has registrado ningún ejercicio.</p>`;
+  h += ejs.map(e => { const hechos = e.apartados.filter(a => a.res !== "pendiente").length;
+    const ref = (e.pagina || e.numero) ? `p. ${esc(e.pagina||"?")} · nº ${esc(e.numero||"?")}` : "Ejercicio por seleccionar";
+    return `<div class="card"><div class="ct"><b>${fmt(e.fecha)} · ${esc(e.materia || "Sin materia")}</b><span class="est-${e.estado}">${esc((ESTADOS_EJ.find(x=>x[0]===e.estado)||[])[1]||e.estado)}</span></div>
+      <div style="font-size:13.5px">${ref} · ${hechos}/${e.apartados.length} apartados · ${fmtT(e.tiempo)} min</div>
+      <div class="chips">${e.apartados.map(a => `<span class="chip r-${a.res}">${esc(a.ap)}: ${esc((RESULTADOS.find(x=>x[0]===a.res)||[])[1]||a.res)}${a.arts.length?" · "+a.arts.map(artLabel).join(", "):""}</span>`).join("")}</div>
+      <div class="acts"><button class="fbtn" data-peditar="${e.id}">Abrir</button>${["pendiente","parcial"].includes(e.estado)?`<button class="fbtn" data-pmanana="${e.id}">Pasar a mañana</button>`:""}</div></div>`; }).join("");
+  return h;
+}
+/* dominio en la pestaña Artículos */
+let domFiltro = "todos";
+function renderDominio(){
+  migrarDominio();
+  const visibles = JI.filter(x => x.desde <= TODAY || domOf(x.id).n > 0 || domOf(x.id).rep);
+  const repar = visibles.filter(x => domOf(x.id).rep);
+  const fila = x => { const d = domOf(x.id);
+    return `<div class="ar"><div><span class="a">${esc(x.ley)} ${esc(x.num)}</span>${d.rep?`<span class="lv rep">reparar</span>`:""}<p>${esc(x.que)}</p>
+      <small>${NIVELES[d.n]}${d.src?" · por "+esc(d.src):""}</small></div>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end"><div class="seg" role="group" aria-label="Dominio de ${esc(x.ley)} ${esc(x.num)}">${[1,2,3,4].map(k=>`<button data-dom="${x.id}" data-v="${k}" aria-pressed="${d.n===k}" title="${NIVELES[k]}">${k}</button>`).join("")}</div>
+      <button class="x" data-domrep="${x.id}">${d.rep?"Quitar reparar":"Marcar reparar"}</button></div></div>`; };
+  let h = `<div class="legend"><b>Dominio:</b> 1 No lo recuerdo · 2 Reconozco de qué trata · 3 Puedo explicarlo de memoria · 4 Puedo aplicarlo en un supuesto escrito.<br>
+    Sube solo con pruebas: el juego hasta 2, las fichas y las recuperaciones +3 hasta 3, Morón y las recuperaciones +7/+14 hasta 4. Un fallo no baja el nivel: marca «reparar». Puedes cambiarlo a mano.</div>
+    <div class="nav"><button data-domf="todos" aria-pressed="${domFiltro==="todos"}">Todos (${visibles.length})</button><button data-domf="rep" aria-pressed="${domFiltro==="rep"}">Necesitan reparación (${repar.length})</button></div>`;
+  if (domFiltro === "rep") return h + (repar.length ? `<section class="grp"><h3>Necesitan reparación</h3>${repar.map(fila).join("")}</section>` : `<p class="empty">Nada pendiente de reparar.</p>`);
+  return h + JC.map(c => { const xs = visibles.filter(x => (x.cats||[])[0] === c.id); if (!xs.length) return "";
+    return `<section class="grp"><h3>${esc(c.nombre)}</h3>${xs.map(fila).join("")}</section>`; }).join("");
 }
 
 /* ---------- vistas ---------- */
@@ -471,7 +626,7 @@ function renderDia(){
     h += step("Preguntas y caso"+opt, "25'", `
       ${d.p1?`<div class="q">${esc(d.p1)}</div>`:""}${d.p2?`<div class="q">${esc(d.p2)}</div>`:""}
       ${d.caso?`<div class="case"><span class="lbl">Caso · redacta la respuesta citando artículo</span><br>${esc(d.caso)}</div>`:""}
-      ${d.moron?`<div class="moron">${esc(d.moron)}</div>`:""}
+      ${d.moron?`<div class="moron">${esc(d.moron)}<div class="acts" style="margin-top:6px"><button class="fbtn" data-go-practica="1">Registrar ejercicio de Morón</button></div></div>`:""}
       ${d.pauta?`<details class="pauta"><summary>Ver pauta de corrección</summary><p>${esc(d.pauta)}</p></details>`:""}`);
   }
   if (d.test){
@@ -480,8 +635,8 @@ function renderDia(){
       <div class="testrow"><label for="ac">Aciertos</label><input id="ac" inputmode="numeric" value="${esc(s.aciertos??"")}">
       <label for="pr">de</label><input id="pr" inputmode="numeric" value="${esc(s.preguntas??"")}"></div>`);
   }
-  { const rs = resumenDia(d.fecha); const tot = rs.n + rs.r + rs.a;
-    const fbox = `<div class="card"><div class="ct"><b>Repaso de este día</b><span>${rs.n} fichas del tema · ${rs.r} repasos · ${rs.a} arrastre</span></div>${tot?`<div class="acts"><button class="fbtn" data-go-fichas="${d.fecha}">Empezar repaso</button></div>`:`<span class="empty">Nada pendiente.</span>`}</div>`;
+  { const rs = resumenDia(d.fecha); const tot = rs.n + rs.r + rs.a + rs.c;
+    const fbox = `<div class="card"><div class="ct"><b>Repaso de este día</b><span>${rs.n} fichas del tema · ${rs.r} repasos · ${rs.a} arrastre${rs.c?` · ${rs.c} recuperaciones`:""}</span></div>${tot?`<div class="acts"><button class="fbtn" data-go-fichas="${d.fecha}">Empezar repaso</button></div>`:`<span class="empty">Nada pendiente.</span>`}</div>`;
     h += step("Arrastre y fichas", "15'", (cards.length ? cards.map(cardHTML).join("") : `<p class="empty">Hoy no hay tarjetas de arrastre programadas.</p>`) + fbox); }
   if (d.comunes) h += step("Comunes", "10'", `<p style="margin:0">${esc(d.comunes.replace(/^10 min · /,""))}</p>`);
   return h;
@@ -501,18 +656,13 @@ function renderSemana(){
 }
 
 function renderArts(){
-  const groups = {};
-  ARTS.forEach(a => (groups[a.norma] ||= []).push(a));
-  return METODO + GUIAS.map(g => guiaHTML(g,false)).join("") + `<div class="legend"><b>Dominio:</b> 0 nada · 1 lo reconozco · 2 lo explico sin mirar · 3 lo aplico y lo cito en un caso una semana después. Las marcas <b>test</b> son artículos que se repiten en el primer ejercicio.</div>` +
-    Object.entries(groups).map(([norma, as]) => `<section class="grp"><h3>${esc(norma)}</h3>${as.map(a => { const v = state.dominio[a.id] ?? 0;
-      return `<div class="ar"><div><span class="a">${esc(a.art)}</span><span class="lv ${a.nivel}">${a.nivel==="Test"?"test":a.nivel}</span><p>${esc(a.que)}</p><small>Primer estudio: ${esc(a.cuando)}</small></div>
-      <div class="seg" role="group" aria-label="Dominio de ${esc(norma)} ${esc(a.art)}">${[0,1,2,3].map(k=>`<button data-art="${a.id}" data-v="${k}" aria-pressed="${v===k}">${k}</button>`).join("")}</div></div>`; }).join("")}</section>`).join("");
+  return METODO + GUIAS.map(g => guiaHTML(g,false)).join("") + renderDominio();
 }
 
 function render(){
   document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.view === view)));
   const ae = document.activeElement && document.activeElement.id;
-  app.innerHTML = syncBox() + (view === "dia" ? renderDia() : view === "semana" ? renderSemana() : view === "fichas" ? renderFichas() : view === "juego" ? renderJuego() : renderArts());
+  app.innerHTML = syncBox() + (view === "dia" ? renderDia() : view === "semana" ? renderSemana() : view === "fichas" ? renderFichas() : view === "juego" ? renderJuego() : view === "practica" ? renderPractica() : renderArts());
   if (ae && (ae==="ac"||ae==="pr")) { const el=document.getElementById(ae); if (el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length);} }
 }
 
@@ -529,6 +679,23 @@ app.addEventListener("click", e => {
   if (b.dataset.jop !== undefined){ jResponder(b.dataset.jop); return; }
   if (b.id === "jok"){ const el = document.getElementById("jnum"); if (el && el.value.trim()) jResponder(el.value); return; }
   if (b.dataset.jsig){ jr.i++; jr.resp = null; render(); window.scrollTo(0,0); const el = document.getElementById("jnum"); if (el) el.focus(); return; }
+  if (b.dataset.pnuevo){ nuevoEjercicio(); render(); return; }
+  if (b.dataset.peditar){ editarEjercicio(b.dataset.peditar); render(); window.scrollTo(0,0); return; }
+  if (b.dataset.pcancel){ pararCrono(); pEdit = null; render(); return; }
+  if (b.dataset.pguardar){ guardarEjercicio(); return; }
+  if (b.dataset.pmanana){ const e = state.moron[b.dataset.pmanana]; if (e){ reprogramar(e, 1); scheduleSave(); render(); } return; }
+  if (b.dataset.crono){ if (pTimer) pararCrono(); else arrancarCrono(); render(); return; }
+  if (b.dataset.crono0){ pararCrono(); pEdit.tiempo = 0; render(); return; }
+  if (b.dataset.addap){ const n = pEdit.apartados.length; pEdit.apartados.push({ ap: String.fromCharCode(97+n), arts: [], res: "pendiente", fallo: "" }); render(); return; }
+  if (b.dataset.quitap){ pEdit.apartados.splice(Number(b.dataset.quitap), 1); render(); return; }
+  if (b.dataset.addartbtn !== undefined){ const i = Number(b.dataset.addartbtn); const el = document.querySelector(`[data-addart="${i}"]`); const ids = artIdsFrom(el ? el.value : "");
+    if (ids.length){ ids.forEach(id => { if (!pEdit.apartados[i].arts.includes(id)) pEdit.apartados[i].arts.push(id); }); render(); } else if (el){ el.value = ""; el.placeholder = "No lo encuentro: prueba «LGT 167» o «LIVA 95»"; } return; }
+  if (b.dataset.quitart){ const [i, id] = b.dataset.quitart.split("|"); pEdit.apartados[Number(i)].arts = pEdit.apartados[Number(i)].arts.filter(x => x !== id); render(); return; }
+  if (b.dataset.dom){ domSet(b.dataset.dom, { n: Number(b.dataset.v), src: "manual", when: TODAY }); scheduleSave(); render(); return; }
+  if (b.dataset.domrep){ const d = domOf(b.dataset.domrep); domSet(b.dataset.domrep, { rep: !d.rep }); scheduleSave(); render(); return; }
+  if (b.dataset.domf){ domFiltro = b.dataset.domf; render(); return; }
+  if (b.dataset.rec){ const it = cola[colaIdx]; if (it){ if (b.dataset.rec === "manana"){ reprogramar(state.recs[it.id], 1); } else cerrarRec(it.id, b.dataset.rec === "ok"); } siguiente(); return; }
+  if (b.dataset.goPractica){ nuevoEjercicio(); view = "practica"; try{localStorage.setItem("hoy-view","practica");}catch(e){} render(); window.scrollTo(0,0); return; }
   if (b.id === "prev" || b.id === "next"){ const i = DAYS.findIndex(d=>d.fecha===cur); cur = DAYS[i + (b.id==="next"?1:-1)].fecha; render(); return; }
   if (b.id === "code-ok"){ const v = (document.getElementById("code").value||"").trim(); if (v.length < 20){ alertBox("El código debe tener al menos 20 caracteres."); return; } CODE = v; try{localStorage.setItem("hoy-code",v);}catch(e){} render(); pull(); return; }
   if (b.id === "hoy"){ cur = pickDay(TODAY); render(); return; }
@@ -537,8 +704,11 @@ app.addEventListener("click", e => {
   if (b.dataset.card){ const v = b.dataset.v; state.cards[b.dataset.card] = state.cards[b.dataset.card] === v ? "" : v; scheduleSave(); render(); return; }
   if (b.dataset.art){ state.dominio[b.dataset.art] = Number(b.dataset.v); scheduleSave(); render(); return; }
 });
-app.addEventListener("keydown", e => { if (e.target.id === "jnum" && e.key === "Enter" && e.target.value.trim()) jResponder(e.target.value); });
+app.addEventListener("keydown", e => { if (e.target.dataset && e.target.dataset.addart !== undefined && e.key === "Enter"){ e.preventDefault(); const bt = document.querySelector(`[data-addartbtn="${e.target.dataset.addart}"]`); if (bt) bt.click(); return; } if (e.target.id === "jnum" && e.key === "Enter" && e.target.value.trim()) jResponder(e.target.value); });
+app.addEventListener("change", e => { if (pEdit && e.target.tagName === "SELECT"){ if (e.target.dataset.pf) pEdit[e.target.dataset.pf] = e.target.value; else if (e.target.dataset.pap !== undefined) pEdit.apartados[Number(e.target.dataset.pap)][e.target.dataset.pk] = e.target.value; } });
 app.addEventListener("input", e => {
+  if (pEdit && e.target.dataset.pf){ pEdit[e.target.dataset.pf] = e.target.value; return; }
+  if (pEdit && e.target.dataset.pap !== undefined && e.target.dataset.pk){ pEdit.apartados[Number(e.target.dataset.pap)][e.target.dataset.pk] = e.target.value; return; }
   if (e.target.id === "resp"){ respDraft = e.target.value; return; }
   if (e.target.id === "ac" || e.target.id === "pr"){
     const s = Object.assign({}, state.dias[cur]); s[e.target.id==="ac"?"aciertos":"preguntas"] = e.target.value.replace(/[^0-9]/g,""); state.dias[cur] = s; scheduleSave();
