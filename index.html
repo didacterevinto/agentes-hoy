@@ -144,7 +144,7 @@ details.guia summary{cursor:pointer;font-weight:700;color:var(--accent)}
 .jop:hover:not([disabled]){border-color:var(--accent)}
 .jop.is-ok{border-color:var(--ok);background:var(--ok-soft);color:var(--ok)}
 .jop.is-bad{border-color:var(--rep);background:var(--rep-soft);color:var(--rep)}
-.jq h1.num{font-family:var(--f-mono)}
+.jq h1.jcod{font-family:var(--f-mono)}
 </style>
 </head><body>
 
@@ -380,7 +380,7 @@ function renderJuego(){
   }
   const q = jr.qs[jr.i], r = jr.resp;
   let h = `<div class="stats"><span>Pregunta <b>${jr.i+1}/${jr.qs.length}</b></span><span>Aciertos <b>${jr.aciertos}</b></span><span>Racha <b>${jr.racha}</b></span></div>
-    <section class="head jq"><div class="lbl">${esc(q.sub)}</div><h1 class="${q.modo===1||q.modo===4?"num":""}" style="font-size:${q.modo===1||q.modo===4?28:21}px">${esc(q.enun)}</h1>`;
+    <section class="head jq"><div class="lbl">${esc(q.sub)}</div><h1 class="${q.modo===1||q.modo===4?"jcod":""}" style="font-size:${q.modo===1||q.modo===4?28:21}px">${esc(q.enun)}</h1>`;
   if (q.modo === 3){
     h += `<div class="testrow"><input id="jnum" inputmode="numeric" autocomplete="off" ${r?"disabled":""} value="${r?esc(r.v):""}" style="width:120px;font-size:20px">
       ${r?"":`<button class="fbtn" id="jok">Comprobar</button>`}</div>`;
